@@ -257,6 +257,8 @@ class AIAssistantApp:
                 audio_file = response.get("audio_file")
                 audio_id = response.get("audio_id")
                 
+                print(f"收到语音模型响应: text={text_response[:30]}..., audio_file={audio_file}, audio_id={audio_id}")
+                
                 # 保存语音ID用于多轮对话
                 self.last_audio_id = audio_id
                 
@@ -268,23 +270,47 @@ class AIAssistantApp:
                 
                 # 如果启用了语音输出并有音频文件，播放语音回复
                 if self.voice_output_var.get() and audio_file and os.path.exists(audio_file):
-                    threading.Thread(target=self.audio_handler.play_audio_file, args=(audio_file,), daemon=True).start()
+                    print(f"准备播放智谱语音文件: {audio_file}")
+                    # 确保音频文件可以访问且不为空
+                    if os.path.getsize(audio_file) > 0:
+                        threading.Thread(target=self.audio_handler.play_audio_file, args=(audio_file,), daemon=True).start()
+                    else:
+                        print(f"警告：智谱返回的音频文件为空: {audio_file}")
+                        # 尝试使用本地TTS作为备用
+                        threading.Thread(target=self.audio_handler.text_to_speech, args=(text_response,), daemon=True).start()
+                else:
+                    if not self.voice_output_var.get():
+                        print("语音输出未启用")
+                    elif not audio_file:
+                        print("未收到音频文件")
+                    elif not os.path.exists(audio_file):
+                        print(f"音频文件不存在: {audio_file}")
             else:
                 # 普通文本响应
-                # 将AI的回复添加到历史记录
-                self.conversation_history.append({"role": "assistant", "content": response})
-                
-                # 在UI上显示回复
-                self.add_message("AI 助手", response)
-                
-                # 如果启用了语音输出，使用本地TTS引擎播放
-                if self.voice_output_var.get():
-                    threading.Thread(target=self.audio_handler.text_to_speech, args=(response,), daemon=True).start()
+                if isinstance(response, str):
+                    # 将AI的回复添加到历史记录
+                    self.conversation_history.append({"role": "assistant", "content": response})
+                    
+                    # 在UI上显示回复
+                    self.add_message("AI 助手", response)
+                    
+                    # 如果启用了语音输出，使用本地TTS引擎播放
+                    if self.voice_output_var.get():
+                        print(f"使用本地TTS朗读文本: {response[:30]}...")
+                        threading.Thread(target=self.audio_handler.text_to_speech, args=(response,), daemon=True).start()
+                else:
+                    error_msg = "未知响应格式"
+                    if response:
+                        error_msg = str(response)
+                    self.add_message("AI 助手", f"错误：{error_msg}")
             
             # 更新状态
             self.status_var.set("回复完成")
         except Exception as e:
             error_message = f"生成回复时出错: {str(e)}"
+            print(error_message)
+            import traceback
+            traceback.print_exc()
             messagebox.showerror("错误", error_message)
             self.status_var.set("错误")
     

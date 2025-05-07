@@ -168,37 +168,62 @@ class AudioHandler:
     
     def text_to_speech(self, text):
         """将文本转换为语音输出，使用本地TTS引擎"""
-        # 使用pygame代替pyttsx3进行语音合成，避免run loop already started的问题
         try:
             # 使用临时文件存储合成的语音
             temp_dir = os.path.join(os.path.dirname(__file__), "temp")
             if not os.path.exists(temp_dir):
                 os.makedirs(temp_dir)
                 
-            temp_file = os.path.join(temp_dir, f"tts_{int(time.time())}.mp3")
+            # 使用wav格式而非mp3，因为pyttsx3更好地支持wav格式
+            temp_file = os.path.join(temp_dir, f"tts_{int(time.time())}.wav")
+            
+            print(f"正在合成语音到: {temp_file}")
             
             # 在单独的线程中运行TTS引擎，避免阻塞主线程
             def synthesize_speech():
                 with self.tts_lock:
                     try:
                         engine = self._get_tts_engine()
+                        # 防止引擎已经被初始化但未被正确清理
+                        if hasattr(engine, '_inLoop') and engine._inLoop:
+                            print("TTS引擎已在运行中，重新初始化...")
+                            self.engine = None
+                            engine = self._get_tts_engine()
+                            
+                        # 设置属性
+                        engine.setProperty('rate', 180)  # 语速
+                        engine.setProperty('volume', 1.0)  # 音量
+                        
+                        # 保存为WAV文件
+                        print("正在将文本保存为音频文件...")
                         engine.save_to_file(text, temp_file)
                         engine.runAndWait()
                         
+                        print("语音合成完成，等待文件写入...")
                         # 等待文件写入完成
-                        time.sleep(0.5)
+                        time.sleep(0.8)
                         
                         # 播放合成的音频文件
                         if os.path.exists(temp_file):
-                            self.play_audio_file(temp_file)
+                            print(f"开始播放合成的语音文件: {temp_file}")
+                            success = self.play_audio_file(temp_file)
+                            if success:
+                                print("语音播放完成")
+                            else:
+                                print("语音播放失败")
                             
-                            # 播放完成后删除临时文件
+                            # 延迟删除临时文件，确保播放完毕
+                            time.sleep(0.5)
                             try:
-                                os.unlink(temp_file)
-                            except:
-                                pass
+                                if os.path.exists(temp_file):
+                                    os.unlink(temp_file)
+                                    print(f"临时文件已删除: {temp_file}")
+                            except Exception as e:
+                                print(f"删除临时文件时出错: {str(e)}")
                     except Exception as e:
-                        print(f"语音合成错误: {str(e)}")
+                        print(f"语音合成错误 (详细): {str(e)}")
+                        import traceback
+                        traceback.print_exc()
             
             # 启动语音合成线程
             speech_thread = threading.Thread(target=synthesize_speech)
@@ -212,19 +237,50 @@ class AudioHandler:
     def play_audio_file(self, file_path):
         """播放音频文件"""
         if not file_path or not os.path.exists(file_path):
-            print("音频文件不存在")
+            print(f"音频文件不存在: {file_path}")
             return False
             
         try:
+            print(f"开始播放音频文件: {file_path}")
+            # 检查文件大小，确保不是空文件
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                print("音频文件为空，无法播放")
+                return False
+                
+            # 确保pygame已初始化
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(frequency=44100)
+                
+            # 尝试停止任何正在播放的音频
+            if pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+                
             # 使用pygame播放音频
             pygame.mixer.music.load(file_path)
             pygame.mixer.music.play()
+            
+            # 输出音频时长信息
+            try:
+                with wave.open(file_path, 'rb') as wav_file:
+                    frames = wav_file.getnframes()
+                    rate = wav_file.getframerate()
+                    duration = frames / float(rate)
+                    print(f"音频时长: {duration:.2f}秒")
+            except:
+                pass
+                
             # 等待播放完成
+            print("等待音频播放完成...")
             while pygame.mixer.music.get_busy():
                 pygame.time.Clock().tick(10)
+                
+            print("音频播放已完成")
             return True
         except Exception as e:
             print(f"播放音频文件时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def extract_text_from_file(self, file_path):
