@@ -8,6 +8,7 @@ import pyttsx3
 import PyPDF2
 import docx
 import pygame
+import time
 from io import BytesIO
 
 class AudioHandler:
@@ -19,14 +20,13 @@ class AudioHandler:
         self.recognizer = sr.Recognizer()
         
         # 文本到语音
-        self.engine = pyttsx3.init()
-        self.engine.setProperty('rate', 180)  # 语速
-        self.engine.setProperty('volume', 1.0)  # 音量
+        self.tts_lock = threading.RLock()  # 添加线程锁，防止多线程同时访问TTS引擎
+        self.engine = None  # 不在初始化时创建引擎，改为按需创建
         
         # 录音相关变量
         self.is_recording = False
         self.audio_frames = []
-        self.sample_rate = 16000  # 智谱AI支持的采样率
+        self.sample_rate = 44100  # 调整为更标准的采样率，提高兼容性
         self.channels = 1
         self.chunk_size = 1024
         self.audio_format = pyaudio.paInt16
@@ -36,6 +36,15 @@ class AudioHandler:
         
         # 初始化pygame用于播放音频
         pygame.mixer.init()
+    
+    def _get_tts_engine(self):
+        """获取或创建TTS引擎"""
+        with self.tts_lock:
+            if self.engine is None:
+                self.engine = pyttsx3.init()
+                self.engine.setProperty('rate', 180)  # 语速
+                self.engine.setProperty('volume', 1.0)  # 音量
+            return self.engine
     
     def start_recording(self):
         """开始录音"""
@@ -47,6 +56,7 @@ class AudioHandler:
         
         # 创建临时文件用于保存录音
         self.temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        self.temp_file.close()  # 立即关闭文件，避免资源问题
         
         # 创建录音流
         self.stream = self.audio.open(
@@ -77,13 +87,20 @@ class AudioHandler:
         if self.stream and self.stream.is_active():
             self.stream.stop_stream()
             self.stream.close()
+            self.stream = None
         
         # 将录音数据写入临时文件
-        with wave.open(self.temp_file.name, 'wb') as wf:
-            wf.setnchannels(self.channels)
-            wf.setsampwidth(self.audio.get_sample_size(self.audio_format))
-            wf.setframerate(self.sample_rate)
-            wf.writeframes(b''.join(self.audio_frames))
+        try:
+            with wave.open(self.temp_file.name, 'wb') as wf:
+                wf.setnchannels(self.channels)
+                wf.setsampwidth(self.audio.get_sample_size(self.audio_format))
+                wf.setframerate(self.sample_rate)
+                wf.writeframes(b''.join(self.audio_frames))
+            
+            # 确保文件完全写入
+            time.sleep(0.1)
+        except Exception as e:
+            print(f"保存音频文件时出错: {str(e)}")
     
     def get_audio_file_path(self):
         """获取录制的音频文件路径"""
@@ -93,37 +110,100 @@ class AudioHandler:
     
     def speech_to_text(self):
         """将录音转换为文本"""
-        if not self.temp_file:
-            return ""
+        if not self.temp_file or not os.path.exists(self.temp_file.name):
+            return "未找到录音文件"
+        
+        file_path = self.temp_file.name
             
         try:
+            # 确保文件已完全写入并关闭
+            time.sleep(0.2)
+            
+            # 创建一个新的识别器实例，避免潜在的状态问题
+            recognizer = sr.Recognizer()
+            
             # 尝试使用本地语音识别
-            with sr.AudioFile(self.temp_file.name) as source:
-                audio_data = self.recognizer.record(source)
+            with sr.AudioFile(file_path) as source:
+                audio_data = recognizer.record(source)
+                
                 # 首选中文识别，fallback到英文
                 try:
-                    text = self.recognizer.recognize_google(audio_data, language='zh-CN')
-                except:
-                    text = self.recognizer.recognize_google(audio_data, language='en-US')
-                return text
+                    text = recognizer.recognize_google(audio_data, language='zh-CN')
+                    return text
+                except sr.UnknownValueError:
+                    try:
+                        # 尝试英文识别
+                        text = recognizer.recognize_google(audio_data, language='en-US')
+                        return text
+                    except:
+                        return "无法识别语音内容"
+                except sr.RequestError as e:
+                    return f"语音识别服务错误: {str(e)}"
         except sr.UnknownValueError:
             return "无法识别语音"
         except sr.RequestError as e:
             return f"语音识别服务错误: {str(e)}"
         except Exception as e:
-            return f"转换语音时出错: {str(e)}"
+            # 保存更详细的错误信息
+            error_msg = f"转换语音时出错: {str(e)}"
+            print(error_msg)
+            # 检查文件状态
+            try:
+                file_size = os.path.getsize(file_path)
+                print(f"音频文件大小: {file_size} 字节")
+                if file_size == 0:
+                    return "录音文件为空，请重新录制"
+            except:
+                pass
+            return error_msg
     
     def clean_temp_files(self):
         """清理临时文件"""
         if self.temp_file and os.path.exists(self.temp_file.name):
-            os.unlink(self.temp_file.name)
+            try:
+                os.unlink(self.temp_file.name)
+            except Exception as e:
+                print(f"删除临时文件时出错: {str(e)}")
             self.temp_file = None
     
     def text_to_speech(self, text):
         """将文本转换为语音输出，使用本地TTS引擎"""
+        # 使用pygame代替pyttsx3进行语音合成，避免run loop already started的问题
         try:
-            self.engine.say(text)
-            self.engine.runAndWait()
+            # 使用临时文件存储合成的语音
+            temp_dir = os.path.join(os.path.dirname(__file__), "temp")
+            if not os.path.exists(temp_dir):
+                os.makedirs(temp_dir)
+                
+            temp_file = os.path.join(temp_dir, f"tts_{int(time.time())}.mp3")
+            
+            # 在单独的线程中运行TTS引擎，避免阻塞主线程
+            def synthesize_speech():
+                with self.tts_lock:
+                    try:
+                        engine = self._get_tts_engine()
+                        engine.save_to_file(text, temp_file)
+                        engine.runAndWait()
+                        
+                        # 等待文件写入完成
+                        time.sleep(0.5)
+                        
+                        # 播放合成的音频文件
+                        if os.path.exists(temp_file):
+                            self.play_audio_file(temp_file)
+                            
+                            # 播放完成后删除临时文件
+                            try:
+                                os.unlink(temp_file)
+                            except:
+                                pass
+                    except Exception as e:
+                        print(f"语音合成错误: {str(e)}")
+            
+            # 启动语音合成线程
+            speech_thread = threading.Thread(target=synthesize_speech)
+            speech_thread.daemon = True
+            speech_thread.start()
             return True
         except Exception as e:
             print(f"语音合成错误: {str(e)}")

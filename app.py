@@ -14,12 +14,12 @@ class AIAssistantApp:
         self.root.geometry("1000x700")
         self.root.minsize(800, 600)
         
-        # 设置主题颜色 - 更现代的配色方案
-        self.bg_color = "#f0f4f8"  # 更柔和的背景色
-        self.accent_color = "#3a7bd5"  # 更鲜明的强调色
-        self.secondary_color = "#00d2ff"  # 次要强调色
-        self.text_color = "#2d3748"  # 更深的文本颜色
-        self.btn_text_color = "#1a202c"  # 按钮文本颜色，不再使用白色
+        # 设置主题颜色
+        self.bg_color = "#f0f4f8"  
+        self.accent_color = "#3a7bd5"  
+        self.secondary_color = "#00d2ff"  
+        self.text_color = "#2d3748"  
+        self.btn_text_color = "#1a202c"  
         
         # 创建并配置样式
         self.style = ttk.Style()
@@ -85,7 +85,7 @@ class AIAssistantApp:
         io_frame = ttk.LabelFrame(control_frame, text="输入/输出模式")
         io_frame.pack(side=tk.LEFT, padx=10)
         
-        # 语音输入开关 - 使用更美观的Checkbutton样式
+        # 语音输入开关
         self.voice_input_var = tk.BooleanVar(value=False)
         voice_input_check = ttk.Checkbutton(io_frame, text="语音输入", variable=self.voice_input_var)
         voice_input_check.pack(side=tk.LEFT, padx=8, pady=8)
@@ -145,7 +145,7 @@ class AIAssistantApp:
         self.input_text = scrolledtext.ScrolledText(
             input_text_frame, 
             wrap=tk.WORD, 
-            height=4,  # 稍微增加高度
+            height=4, 
             font=("Microsoft YaHei", 10),
             padx=10,
             pady=10,
@@ -154,11 +154,10 @@ class AIAssistantApp:
         )
         self.input_text.pack(fill=tk.BOTH, expand=True)
         
-        # 发送按钮 - 使用更现代的样式
+        # 发送按钮
         send_button = ttk.Button(input_frame, text="发送", command=self.send_message, style="Send.TButton")
         send_button.pack(side=tk.RIGHT, padx=5, pady=5)
-        
-        # 创建特殊的发送按钮样式
+              
         self.style.configure("Send.TButton", 
                             background=self.secondary_color, 
                             foreground=self.btn_text_color,
@@ -170,7 +169,7 @@ class AIAssistantApp:
         # 绑定回车键发送消息
         self.input_text.bind("<Control-Return>", lambda event: self.send_message())
         
-        # 状态栏 - 使用更现代的样式
+        # 状态栏 
         self.status_var = tk.StringVar(value="就绪")
         status_frame = ttk.Frame(self.root)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X)
@@ -179,7 +178,7 @@ class AIAssistantApp:
             status_frame, 
             textvariable=self.status_var, 
             anchor=tk.W,
-            padding=(10, 5)  # 增加内边距
+            padding=(10, 5)
         )
         status_bar.pack(side=tk.LEFT, fill=tk.X)
     
@@ -220,7 +219,6 @@ class AIAssistantApp:
         # 更新状态
         self.status_var.set("正在生成回复...")
         
-        # 在新线程中发送请求以避免阻塞UI
         threading.Thread(target=self.process_request, args=(user_input,), daemon=True).start()
     
     def process_request(self, user_input):
