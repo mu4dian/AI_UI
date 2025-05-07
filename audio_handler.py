@@ -7,6 +7,8 @@ import speech_recognition as sr
 import pyttsx3
 import PyPDF2
 import docx
+import pygame
+from io import BytesIO
 
 class AudioHandler:
     """处理语音输入输出和文件文本提取"""
@@ -24,13 +26,16 @@ class AudioHandler:
         # 录音相关变量
         self.is_recording = False
         self.audio_frames = []
-        self.sample_rate = 16000
+        self.sample_rate = 16000  # 智谱AI支持的采样率
         self.channels = 1
         self.chunk_size = 1024
         self.audio_format = pyaudio.paInt16
         self.audio = pyaudio.PyAudio()
         self.stream = None
         self.temp_file = None
+        
+        # 初始化pygame用于播放音频
+        pygame.mixer.init()
     
     def start_recording(self):
         """开始录音"""
@@ -80,16 +85,26 @@ class AudioHandler:
             wf.setframerate(self.sample_rate)
             wf.writeframes(b''.join(self.audio_frames))
     
+    def get_audio_file_path(self):
+        """获取录制的音频文件路径"""
+        if self.temp_file and os.path.exists(self.temp_file.name):
+            return self.temp_file.name
+        return None
+    
     def speech_to_text(self):
         """将录音转换为文本"""
         if not self.temp_file:
             return ""
             
         try:
-            # 使用speech_recognition库进行语音识别
+            # 尝试使用本地语音识别
             with sr.AudioFile(self.temp_file.name) as source:
                 audio_data = self.recognizer.record(source)
-                text = self.recognizer.recognize_google(audio_data, language='zh-CN')
+                # 首选中文识别，fallback到英文
+                try:
+                    text = self.recognizer.recognize_google(audio_data, language='zh-CN')
+                except:
+                    text = self.recognizer.recognize_google(audio_data, language='en-US')
                 return text
         except sr.UnknownValueError:
             return "无法识别语音"
@@ -97,19 +112,40 @@ class AudioHandler:
             return f"语音识别服务错误: {str(e)}"
         except Exception as e:
             return f"转换语音时出错: {str(e)}"
-        finally:
-            # 清理临时文件
-            if os.path.exists(self.temp_file.name):
-                os.unlink(self.temp_file.name)
+    
+    def clean_temp_files(self):
+        """清理临时文件"""
+        if self.temp_file and os.path.exists(self.temp_file.name):
+            os.unlink(self.temp_file.name)
             self.temp_file = None
     
     def text_to_speech(self, text):
-        """将文本转换为语音输出"""
+        """将文本转换为语音输出，使用本地TTS引擎"""
         try:
             self.engine.say(text)
             self.engine.runAndWait()
+            return True
         except Exception as e:
             print(f"语音合成错误: {str(e)}")
+            return False
+    
+    def play_audio_file(self, file_path):
+        """播放音频文件"""
+        if not file_path or not os.path.exists(file_path):
+            print("音频文件不存在")
+            return False
+            
+        try:
+            # 使用pygame播放音频
+            pygame.mixer.music.load(file_path)
+            pygame.mixer.music.play()
+            # 等待播放完成
+            while pygame.mixer.music.get_busy():
+                pygame.time.Clock().tick(10)
+            return True
+        except Exception as e:
+            print(f"播放音频文件时出错: {str(e)}")
+            return False
     
     def extract_text_from_file(self, file_path):
         """从文件中提取文本内容"""

@@ -14,16 +14,24 @@ class AIAssistantApp:
         self.root.geometry("1000x700")
         self.root.minsize(800, 600)
         
-        # 设置主题颜色
-        self.bg_color = "#f5f5f5"
-        self.accent_color = "#4a6fa5"
-        self.text_color = "#333333"
+        # 设置主题颜色 - 更现代的配色方案
+        self.bg_color = "#f0f4f8"  # 更柔和的背景色
+        self.accent_color = "#3a7bd5"  # 更鲜明的强调色
+        self.secondary_color = "#00d2ff"  # 次要强调色
+        self.text_color = "#2d3748"  # 更深的文本颜色
+        self.btn_text_color = "#1a202c"  # 按钮文本颜色，不再使用白色
         
         # 创建并配置样式
         self.style = ttk.Style()
         self.style.configure("TFrame", background=self.bg_color)
-        self.style.configure("TButton", background=self.accent_color, foreground="white", padding=6)
+        self.style.configure("TButton", background=self.accent_color, foreground=self.btn_text_color, font=("Microsoft YaHei", 9), padding=6)
+        self.style.map("TButton", 
+                      foreground=[('active', self.btn_text_color), ('pressed', self.btn_text_color)],
+                      background=[('active', self.secondary_color), ('pressed', "#2a6ac1")])
         self.style.configure("TLabel", background=self.bg_color, foreground=self.text_color)
+        self.style.configure("TLabelframe", background=self.bg_color)
+        self.style.configure("TLabelframe.Label", background=self.bg_color, foreground=self.accent_color, font=("Microsoft YaHei", 9, "bold"))
+        self.style.configure("TCheckbutton", background=self.bg_color)
         
         # 设置API实例
         self.zhipu_ai = ZhipuAI()
@@ -36,6 +44,9 @@ class AIAssistantApp:
         # 对话历史记录
         self.conversation_history = []
         
+        # 最后一次语音回复的音频ID，用于多轮对话
+        self.last_audio_id = None
+        
         # 创建UI
         self.create_widgets()
         
@@ -45,40 +56,44 @@ class AIAssistantApp:
     def create_widgets(self):
         # 主界面框架
         main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)  # 增加内边距
         
         # 顶部控制区域
         control_frame = ttk.Frame(main_frame)
-        control_frame.pack(fill=tk.X, pady=(0, 10))
+        control_frame.pack(fill=tk.X, pady=(0, 15))  # 增加下边距
         
         # 模型选择区域
         model_frame = ttk.LabelFrame(control_frame, text="模型选择")
         model_frame.pack(side=tk.LEFT, padx=5)
         
+        # 创建自定义样式的下拉菜单
+        self.style.configure("TMenubutton", background=self.bg_color, foreground=self.text_color, padding=5)
+        
         # 模型选择下拉菜单
         self.model_var = tk.StringVar(value="智谱AI-GLM-4")
         model_options = [
             "智谱AI-GLM-4", 
-            "智谱AI-GLM-3-Turbo", 
+            "智谱AI-GLM-3-Turbo",
+            "智谱AI-GLM-4-Voice",
             "Deepseek-Coder", 
             "Deepseek-Chat"
         ]
         model_menu = ttk.OptionMenu(model_frame, self.model_var, model_options[0], *model_options, command=self.change_model)
-        model_menu.pack(padx=5, pady=5)
+        model_menu.pack(padx=8, pady=8)  # 增加内边距
         
         # 输入/输出模式选择区域
         io_frame = ttk.LabelFrame(control_frame, text="输入/输出模式")
-        io_frame.pack(side=tk.LEFT, padx=5)
+        io_frame.pack(side=tk.LEFT, padx=10)
         
-        # 语音输入开关
+        # 语音输入开关 - 使用更美观的Checkbutton样式
         self.voice_input_var = tk.BooleanVar(value=False)
         voice_input_check = ttk.Checkbutton(io_frame, text="语音输入", variable=self.voice_input_var)
-        voice_input_check.pack(side=tk.LEFT, padx=5, pady=5)
+        voice_input_check.pack(side=tk.LEFT, padx=8, pady=8)
         
         # 语音输出开关
         self.voice_output_var = tk.BooleanVar(value=False)
         voice_output_check = ttk.Checkbutton(io_frame, text="语音输出", variable=self.voice_output_var)
-        voice_output_check.pack(side=tk.LEFT, padx=5, pady=5)
+        voice_output_check.pack(side=tk.LEFT, padx=8, pady=8)
         
         # API 设置按钮
         settings_button = ttk.Button(control_frame, text="API设置", command=self.open_settings)
@@ -88,49 +103,96 @@ class AIAssistantApp:
         clear_button = ttk.Button(control_frame, text="清空对话", command=self.clear_conversation)
         clear_button.pack(side=tk.RIGHT, padx=5)
         
-        # 对话区域
+        # 对话区域 - 增加圆角和阴影效果
         conversation_frame = ttk.Frame(main_frame)
         conversation_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 对话显示区域
-        self.conversation_text = scrolledtext.ScrolledText(conversation_frame, wrap=tk.WORD, bg="#ffffff", font=("Microsoft YaHei", 10))
+        # 对话显示区域 - 使用更现代的字体和颜色
+        self.conversation_text = scrolledtext.ScrolledText(
+            conversation_frame, 
+            wrap=tk.WORD, 
+            bg="#ffffff", 
+            font=("Microsoft YaHei", 10),
+            padx=10,
+            pady=10,
+            borderwidth=0,
+            relief=tk.FLAT
+        )
         self.conversation_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.conversation_text.config(state=tk.DISABLED)
         
         # 底部输入区域
         input_frame = ttk.Frame(main_frame)
-        input_frame.pack(fill=tk.X, pady=(10, 0))
+        input_frame.pack(fill=tk.X, pady=(15, 0))  # 增加上边距
+        
+        # 创建按钮样式
+        button_frame = ttk.Frame(input_frame)
+        button_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
         
         # 文件上传按钮
-        upload_button = ttk.Button(input_frame, text="上传文件", command=self.upload_file)
-        upload_button.pack(side=tk.LEFT, padx=5)
+        upload_button = ttk.Button(button_frame, text="上传文件", command=self.upload_file)
+        upload_button.pack(side=tk.TOP, padx=5, pady=5, fill=tk.X)
         
         # 开始语音输入按钮
         self.voice_button_text = tk.StringVar(value="开始语音")
-        self.voice_button = ttk.Button(input_frame, textvariable=self.voice_button_text, command=self.toggle_voice_input)
-        self.voice_button.pack(side=tk.LEFT, padx=5)
+        self.voice_button = ttk.Button(button_frame, textvariable=self.voice_button_text, command=self.toggle_voice_input)
+        self.voice_button.pack(side=tk.TOP, padx=5, pady=5, fill=tk.X)
         
-        # 文本输入区域
-        self.input_text = scrolledtext.ScrolledText(input_frame, wrap=tk.WORD, height=3, font=("Microsoft YaHei", 10))
-        self.input_text.pack(fill=tk.X, expand=True, padx=5, pady=5, side=tk.LEFT)
+        # 文本输入区域 - 优化样式
+        input_text_frame = ttk.Frame(input_frame)
+        input_text_frame.pack(fill=tk.BOTH, expand=True, side=tk.LEFT)
         
-        # 发送按钮
-        send_button = ttk.Button(input_frame, text="发送", command=self.send_message)
-        send_button.pack(side=tk.RIGHT, padx=5)
+        self.input_text = scrolledtext.ScrolledText(
+            input_text_frame, 
+            wrap=tk.WORD, 
+            height=4,  # 稍微增加高度
+            font=("Microsoft YaHei", 10),
+            padx=10,
+            pady=10,
+            borderwidth=1,
+            relief=tk.FLAT
+        )
+        self.input_text.pack(fill=tk.BOTH, expand=True)
+        
+        # 发送按钮 - 使用更现代的样式
+        send_button = ttk.Button(input_frame, text="发送", command=self.send_message, style="Send.TButton")
+        send_button.pack(side=tk.RIGHT, padx=5, pady=5)
+        
+        # 创建特殊的发送按钮样式
+        self.style.configure("Send.TButton", 
+                            background=self.secondary_color, 
+                            foreground=self.btn_text_color,
+                            font=("Microsoft YaHei", 10, "bold"))
+        self.style.map("Send.TButton",
+                      foreground=[('active', self.btn_text_color), ('pressed', self.btn_text_color)],
+                      background=[('active', "#41c7ff"), ('pressed', "#00b8e6")])
         
         # 绑定回车键发送消息
         self.input_text.bind("<Control-Return>", lambda event: self.send_message())
         
-        # 状态栏
+        # 状态栏 - 使用更现代的样式
         self.status_var = tk.StringVar(value="就绪")
-        status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
-        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        status_frame = ttk.Frame(self.root)
+        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        status_bar = ttk.Label(
+            status_frame, 
+            textvariable=self.status_var, 
+            anchor=tk.W,
+            padding=(10, 5)  # 增加内边距
+        )
+        status_bar.pack(side=tk.LEFT, fill=tk.X)
     
     def change_model(self, selection):
         """更改当前使用的AI模型"""
         if "智谱AI" in selection:
             self.current_api = self.zhipu_ai
-            if "GLM-4" in selection:
+            if "GLM-4-Voice" in selection:
+                self.zhipu_ai.set_model("glm-4-voice")
+                # 自动启用语音输入/输出
+                self.voice_input_var.set(True)
+                self.voice_output_var.set(True)
+            elif "GLM-4" in selection:
                 self.zhipu_ai.set_model("glm-4")
             else:
                 self.zhipu_ai.set_model("glm-3-turbo")
@@ -146,7 +208,7 @@ class AIAssistantApp:
     def send_message(self):
         """发送消息到AI模型并获取回复"""
         user_input = self.input_text.get("1.0", tk.END).strip()
-        if not user_input:
+        if not user_input and not self.voice_input_var.get():
             return
         
         # 清空输入框
@@ -164,21 +226,62 @@ class AIAssistantApp:
     def process_request(self, user_input):
         """处理AI请求的线程"""
         try:
+            # 检查是否启用了语音模型和语音输入
+            is_voice_model = self.current_api == self.zhipu_ai and self.current_api.model == "glm-4-voice"
+            
+            # 创建消息对象
+            user_message = {"role": "user", "content": user_input}
+            
+            # 如果使用语音模型且启用了语音输入，获取最后录制的音频文件路径
+            if is_voice_model and self.voice_input_var.get():
+                audio_file_path = self.audio_handler.get_audio_file_path()
+                if audio_file_path:
+                    user_message["audio_file"] = audio_file_path
+            
             # 将消息添加到历史记录
-            self.conversation_history.append({"role": "user", "content": user_input})
+            self.conversation_history.append(user_message)
+            
+            # 如果上一次有语音回复，添加语音ID到对话中以维持多轮对话
+            if is_voice_model and self.last_audio_id:
+                for i, msg in enumerate(self.conversation_history):
+                    # 找到最后一个助手回复，添加audio_id
+                    if msg["role"] == "assistant" and i > 0 and i == len(self.conversation_history) - 2:
+                        msg["audio_id"] = self.last_audio_id
+                        break
             
             # 发送请求给AI
             response = self.current_api.generate_response(self.conversation_history)
             
-            # 将AI的回复添加到历史记录
-            self.conversation_history.append({"role": "assistant", "content": response})
-            
-            # 在对话框中显示回复
-            self.add_message("AI 助手", response)
-            
-            # 如果启用了语音输出，将回复转换为语音
-            if self.voice_output_var.get():
-                threading.Thread(target=self.audio_handler.text_to_speech, args=(response,), daemon=True).start()
+            # 处理响应
+            if is_voice_model and isinstance(response, dict):
+                # 如果是语音模型返回的字典响应
+                text_response = response.get("text", "")
+                audio_file = response.get("audio_file")
+                audio_id = response.get("audio_id")
+                
+                # 保存语音ID用于多轮对话
+                self.last_audio_id = audio_id
+                
+                # 将AI的回复添加到历史记录
+                self.conversation_history.append({"role": "assistant", "content": text_response})
+                
+                # 在UI上显示回复
+                self.add_message("AI 助手", text_response)
+                
+                # 如果启用了语音输出并有音频文件，播放语音回复
+                if self.voice_output_var.get() and audio_file and os.path.exists(audio_file):
+                    threading.Thread(target=self.audio_handler.play_audio_file, args=(audio_file,), daemon=True).start()
+            else:
+                # 普通文本响应
+                # 将AI的回复添加到历史记录
+                self.conversation_history.append({"role": "assistant", "content": response})
+                
+                # 在UI上显示回复
+                self.add_message("AI 助手", response)
+                
+                # 如果启用了语音输出，使用本地TTS引擎播放
+                if self.voice_output_var.get():
+                    threading.Thread(target=self.audio_handler.text_to_speech, args=(response,), daemon=True).start()
             
             # 更新状态
             self.status_var.set("回复完成")
@@ -186,7 +289,7 @@ class AIAssistantApp:
             error_message = f"生成回复时出错: {str(e)}"
             messagebox.showerror("错误", error_message)
             self.status_var.set("错误")
-            
+    
     def add_message(self, sender, message):
         """将消息添加到对话框"""
         self.conversation_text.config(state=tk.NORMAL)
@@ -227,16 +330,28 @@ class AIAssistantApp:
         while self.audio_handler.is_recording:
             time.sleep(0.1)
         
-        # 将录音转换为文本
-        text = self.audio_handler.speech_to_text()
+        # 检查当前是否使用语音模型
+        is_voice_model = self.current_api == self.zhipu_ai and self.current_api.model == "glm-4-voice"
         
-        if text:
-            # 将转换后的文本添加到输入框
-            self.input_text.delete("1.0", tk.END)
-            self.input_text.insert("1.0", text)
-            self.status_var.set("语音已转换为文本")
+        if is_voice_model:
+            # 如果使用的是语音模型，不需要本地转文字，直接发送音频文件给API
+            self.status_var.set("录音完成，准备发送")
+            # 如果输入框为空，添加默认文本
+            if not self.input_text.get("1.0", tk.END).strip():
+                self.input_text.insert("1.0", "请处理这段语音")
+            # 调用发送函数
+            self.send_message()
         else:
-            self.status_var.set("语音转换失败")
+            # 使用本地语音识别转换为文本
+            text = self.audio_handler.speech_to_text()
+            
+            if text:
+                # 将转换后的文本添加到输入框
+                self.input_text.delete("1.0", tk.END)
+                self.input_text.insert("1.0", text)
+                self.status_var.set("语音已转换为文本")
+            else:
+                self.status_var.set("语音转换失败")
     
     def upload_file(self):
         """上传文件处理"""
@@ -331,6 +446,7 @@ class AIAssistantApp:
     def clear_conversation(self):
         """清空对话历史"""
         self.conversation_history = []
+        self.last_audio_id = None  # 清除语音ID
         self.conversation_text.config(state=tk.NORMAL)
         self.conversation_text.delete("1.0", tk.END)
         self.conversation_text.config(state=tk.DISABLED)
